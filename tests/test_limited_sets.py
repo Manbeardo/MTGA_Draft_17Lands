@@ -1,7 +1,9 @@
 import pytest
 import os
 import json
-from src.limited_sets import LimitedSets, SetInfo, SetDictionary
+from src.limited_sets.LimitedSets import LimitedSets
+from src.limited_sets.SetDictionary import SetDictionary
+from src.limited_sets.SetInfo import SetInfo
 
 # Test data
 SETS_FILE_LOCATION = os.path.join(os.getcwd(), "Temp", "unit_test_sets.json")

@@ -1,22 +1,14 @@
-import os
+from src.app_update import DOWNLOADS_FOLDER, UPDATE_FILENAME, UPDATE_LATEST_URL, logger
+
+
 import json
-import urllib.request
-import ssl
+import os
 import re
 import shutil
+import ssl
+import urllib.request
 import zipfile
 from typing import Tuple
-from src.logger import create_logger
-
-logger = create_logger()
-
-DOWNLOADS_FOLDER = os.path.join(os.getcwd(), "Downloads")
-
-UPDATE_LATEST_URL = "https://api.github.com/repos/Manbeardo/MTGA_Draft_17Lands/releases/latest"
-UPDATE_FILENAME = "MTGA_Draft_Tool_Setup.exe"
-
-if not os.path.exists(DOWNLOADS_FOLDER):
-    os.makedirs(DOWNLOADS_FOLDER)
 
 
 class AppUpdate:

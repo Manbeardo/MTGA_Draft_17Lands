@@ -1,7 +1,7 @@
 import pytest
 import os
 import sys
-from src.app_update import AppUpdate
+from src.app_update.AppUpdate import AppUpdate
 
 EXPECTED_OLD_VERSION_STRING = "0307"
 

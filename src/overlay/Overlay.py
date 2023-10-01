@@ -1,321 +1,34 @@
-"""This module contains the functions and classes that are used for building and handling the application UI"""
-import tkinter
-from tkinter.ttk import Progressbar, Treeview, Style, OptionMenu, Button, Checkbutton, Label, Separator
-from tkinter import filedialog, messagebox
-from datetime import date
-import urllib
-import os
-import sys
-import io
-import math
-import argparse
-import webbrowser
-from dataclasses import dataclass
-from ttkwidgets.autocomplete import AutocompleteEntry
-from pynput.keyboard import Listener, KeyCode
-from PIL import Image, ImageTk, ImageFont
-from src.configuration import read_configuration, write_configuration, reset_configuration
-from src.limited_sets import LimitedSets
-from src.log_scanner import ArenaScanner
-from src import file_extractor as FE
-from src import card_logic as CL
 from src import constants
-from src.logger import create_logger
-from src.app_update import AppUpdate
+from src import card_logic as CL
+import src.card_logic.CardResult
+from src import file_extractor as FE
+import src.file_extractor.FileExtractor
+from src.overlay import HOTKEY_CTRL_G
+from src.overlay.CreateCardToolTip import CardToolTip
+from src.app_update.AppUpdate import AppUpdate
+from src.config import read_configuration, reset_configuration, write_configuration
+from src.limited_sets.LimitedSets import LimitedSets
+from src.log_scanner.ArenaScanner import ArenaScanner
+from src.overlay import APPLICATION_VERSION, check_version, control_table_column, copy_suggested, copy_taken, fixed_map, identify_card_row_tag, identify_safe_coordinates, identify_table_row_tag, logger, restart_overlay, toggle_widget, url_callback
+from src.overlay.ScaledWindow import ScaledWindow
+
 
 try:
     import win32api
 except ImportError:
     pass
 
-APPLICATION_VERSION = 3.10
-
-HOTKEY_CTRL_G = '\x07'
-
-logger = create_logger()
-
-
-@dataclass
-class TableInfo:
-    reverse: bool = True
-    column: str = ""
-
-
-def start_overlay():
-    """Retrieve arguments, create overlay object, and run overlay"""
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument('-f', '--file')
-    parser.add_argument('-d', '--data')
-    parser.add_argument('--step', action='store_true')
-
-    args = parser.parse_args()
-
-    overlay = Overlay(args)
-
-    overlay.main_loop()
-
-
-def restart_overlay(root):
-    """Close/destroy the current overlay object and create a new instance"""
-    root.close_overlay()
-    start_overlay()
-
-
-def check_version(update, version):
-    """Compare the application version and the latest version in the repository"""
-    return_value = False
-    file_version, file_location = update.retrieve_file_version()
-    if file_version:
-        file_version = int(file_version)
-        client_version = round(float(version) * 100)
-        if file_version > client_version:
-            return_value = True
-
-        file_version = round(float(file_version) / 100.0, 2)
-    return return_value, file_version, file_location
-
-
-def fixed_map(style, option):
-    ''' Returns the style map for 'option' with any styles starting with
-     ("!disabled", "!selected", ...) filtered out
-     style.map() returns an empty list for missing options, so this should
-     be future-safe'''
-    return [elm for elm in style.map("Treeview", query_opt=option)
-            if elm[:2] != ("!disabled", "!selected")]
-
-
-def control_table_column(table, column_fields, table_width=None):
-    """Hide disabled table columns"""
-    visible_columns = {}
-    last_field_index = 0
-    for count, (key, value) in enumerate(column_fields.items()):
-        if value != constants.DATA_FIELD_DISABLED:
-            table.heading(key, text=value.upper())
-            # visible_columns.append(key)
-            visible_columns[key] = count
-            last_field_index = count
-
-    table["displaycolumns"] = list(visible_columns.keys())
-
-    # Resize columns if there are fewer than 4
-    if table_width:
-        total_visible_columns = len(visible_columns)
-        width = table_width
-        offset = 0
-        if total_visible_columns <= 4:
-            proportions = constants.TABLE_PROPORTIONS[total_visible_columns - 1]
-            for column in table["displaycolumns"]:
-                column_width = min(int(math.ceil(
-                    proportions[offset] * table_width)), width)
-                width -= column_width
-                offset += 1
-                table.column(column, width=column_width)
-
-            table["show"] = "headings"  # use after setting columns
-
-    return last_field_index, visible_columns
-
-
-def copy_suggested(deck_colors, deck, color_options):
-    """Copy the deck and sideboard list from the Suggest Deck window"""
-    colors = color_options[deck_colors.get()]
-    deck_string = ""
-    try:
-        deck_string = CL.copy_deck(
-            deck[colors]["deck_cards"], deck[colors]["sideboard_cards"])
-        copy_clipboard(deck_string)
-    except Exception as error:
-        logger.error(error)
-    return
-
-
-def copy_taken(taken_cards):
-    """Copy the card list from the Taken Cards window"""
-    deck_string = ""
-    try:
-        stacked_cards = CL.stack_cards(taken_cards)
-        deck_string = CL.copy_deck(
-            stacked_cards, None)
-        copy_clipboard(deck_string)
-
-    except Exception as error:
-        logger.error(error)
-    return
-
-
-def copy_clipboard(copy):
-    """Send the copied data to the clipboard"""
-    try:
-        # Attempt to copy to clipboard
-        clip = tkinter.Tk()
-        clip.withdraw()
-        clip.clipboard_clear()
-        clip.clipboard_append(copy)
-        clip.update()
-        clip.destroy()
-    except Exception as error:
-        logger.error(error)
-    return
-
-
-def identify_table_row_tag(colors_enabled, colors, index):
-    """Return the row color (black/white or card color) depending on the application settings"""
-    tag = ""
-
-    if colors_enabled:
-        tag = CL.row_color_tag(colors)
-    else:
-        tag = constants.BW_ROW_COLOR_ODD_TAG if index % 2 else constants.BW_ROW_COLOR_EVEN_TAG
-
-    return tag
-
-
-def identify_safe_coordinates(root, window_width, window_height, offset_x, offset_y):
-    '''Return x,y coordinates that fall within the bounds of the screen'''
-    location_x = 0
-    location_y = 0
-
-    try:
-        pointer_x = root.winfo_pointerx()
-        pointer_y = root.winfo_pointery()
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
-
-        if pointer_x + offset_x + window_width > screen_width:
-            location_x = max(pointer_x - offset_x - window_width, 0)
-        else:
-            location_x = pointer_x + offset_x
-
-        if pointer_y + offset_y + window_height > screen_height:
-            location_y = max(pointer_y - offset_y - window_height, 0)
-        else:
-            location_y = pointer_y + offset_y
-
-    except Exception as error:
-        logger.error(error)
-
-    return location_x, location_y
-
-
-def toggle_widget(input_widget, enable):
-    '''Hide/Display a UI widget'''
-    try:
-        if enable:
-            input_widget.grid()
-        else:
-            input_widget.grid_remove()
-    except Exception as error:
-        logger.error(error)
-
-
-def identify_card_row_tag(configuration, card_data, count):
-    '''Wrapper function for setting the row color for a card'''
-    if configuration.color_identity_enabled or constants.CARD_TYPE_LAND in card_data[constants.DATA_FIELD_TYPES]:
-        colors = card_data[constants.DATA_FIELD_COLORS]
-    else:
-        colors = card_data[constants.DATA_FIELD_MANA_COST]
-
-    row_tag = identify_table_row_tag(
-        configuration.card_colors_enabled, colors, count)
-
-    return row_tag
-
-
-def disable_resizing(event, table):
-    '''Disable the column resizing for a treeview table'''
-    if table.identify_region(event.x, event.y) == "separator":
-        return "break"
-
-
-def url_callback(event):
-    webbrowser.open_new(event.widget.cget("text"))
-
-
-class ScaledWindow:
-    def __init__(self):
-        self.scale_factor = 1
-        self.fonts_dict = {}
-        self.table_info = {}
-
-    def _scale_value(self, value):
-        scaled_value = int(value * self.scale_factor)
-
-        return scaled_value
-
-    def _create_header(self, table_label, frame, height, font, headers, total_width, include_header, fixed_width, table_style, stretch_enabled):
-        """Configure the tkinter Treeview widget tables that are used to list draft data"""
-        header_labels = tuple(headers.keys())
-        show_header = "headings" if include_header else ""
-        column_stretch = tkinter.YES if stretch_enabled else tkinter.NO
-        list_box = Treeview(frame, columns=header_labels,
-                            show=show_header, style=table_style, height=height)
-
-        try:
-            for key, value in constants.ROW_TAGS_BW_DICT.items():
-                list_box.tag_configure(
-                    key, font=(value[0], font, "bold"), background=value[1], foreground=value[2])
-
-            for key, value in constants.ROW_TAGS_COLORS_DICT.items():
-                list_box.tag_configure(
-                    key, font=(value[0], font, "bold"), background=value[1], foreground=value[2])
-
-            for column in header_labels:
-                if fixed_width:
-                    column_width = int(
-                        math.ceil(headers[column]["width"] * total_width))
-                    list_box.column(column,
-                                    stretch=column_stretch,
-                                    anchor=headers[column]["anchor"],
-                                    width=column_width)
-                else:
-                    list_box.column(column, stretch=column_stretch,
-                                    anchor=headers[column]["anchor"])
-                list_box.heading(column, text=column, anchor=tkinter.CENTER,
-                                 command=lambda _col=column: self._sort_table_column(table_label, list_box, _col, True))
-            list_box["show"] = show_header  # use after setting columns
-            if include_header:
-                list_box.bind(
-                    '<Button-1>', lambda event: disable_resizing(event, table=list_box))
-            self.table_info[table_label] = TableInfo()
-        except Exception as error:
-            logger.error(error)
-        return list_box
-
-    def _sort_table_column(self, table_label, table, column, reverse):
-        """Sort the table columns when clicked"""
-        row_colors = False
-
-        try:
-            # Sort column that contains numeric values
-            row_list = [(float(table.set(k, column)), k)
-                        for k in table.get_children('')]
-        except ValueError:
-            # Sort column that contains string values
-            row_list = [(table.set(k, column), k)
-                        for k in table.get_children('')]
-
-        row_list.sort(key=lambda x: CL.field_process_sort(
-            x[0]), reverse=reverse)
-
-        if row_list:
-            tags = table.item(row_list[0][1])["tags"][0]
-            row_colors = True if tags in constants.ROW_TAGS_COLORS_DICT else False
-
-        for index, value in enumerate(row_list):
-            table.move(value[1], "", index)
-
-            # Reset the black/white shades for sorted rows
-            if not row_colors:
-                row_tag = identify_table_row_tag(False, "", index)
-                table.item(value[1], tags=row_tag)
-
-        if table_label in self.table_info:
-            self.table_info[table_label].reverse = reverse
-            self.table_info[table_label].column = column
-
-        table.heading(column, command=lambda: self._sort_table_column(
-            table_label, table, column, not reverse))
+from pynput.keyboard import KeyCode, Listener
+from ttkwidgets.autocomplete import AutocompleteEntry
+
+
+import math
+import os
+import sys
+import tkinter
+from datetime import date
+from tkinter import filedialog
+from tkinter.ttk import Button, Checkbutton, Label, OptionMenu, Progressbar, Separator, Style
 
 
 class Overlay(ScaledWindow):
@@ -349,7 +62,7 @@ class Overlay(ScaledWindow):
 
         self.step_through = args.step
 
-        self.extractor = FE.FileExtractor(self.data_file)
+        self.extractor = src.file_extractor.FileExtractor.FileExtractor(self.data_file)
         self.limited_sets = LimitedSets().retrieve_limited_sets()
         self.draft = ArenaScanner(
             self.arena_file, self.limited_sets, step_through=self.step_through)
@@ -801,7 +514,7 @@ class Overlay(ScaledWindow):
     def __update_pack_table(self, card_list, filtered_colors, fields):
         '''Update the table that lists the cards within the current pack'''
         try:
-            result_class = CL.CardResult(
+            result_class = src.card_logic.CardResult.CardResult(
                 self.set_metrics, self.tier_data, self.configuration, self.draft.current_pick)
             result_list = result_class.return_results(
                 card_list, filtered_colors, fields)
@@ -863,7 +576,7 @@ class Overlay(ScaledWindow):
                     self.missing_table.config(height=0)
 
                 if list_length:
-                    result_class = CL.CardResult(
+                    result_class = src.card_logic.CardResult.CardResult(
                         self.set_metrics, self.tier_data, self.configuration, self.draft.current_pick)
                     result_list = result_class.return_results(
                         missing_cards, filtered_colors, fields)
@@ -932,7 +645,7 @@ class Overlay(ScaledWindow):
                     if cards:
                         self.compare_list.append(cards[0])
 
-            result_class = CL.CardResult(
+            result_class = src.card_logic.CardResult.CardResult(
                 self.set_metrics, self.tier_data, self.configuration, self.draft.current_pick)
             result_list = result_class.return_results(
                 self.compare_list, filtered_colors, fields)
@@ -1030,7 +743,7 @@ class Overlay(ScaledWindow):
                 for row in self.taken_table.get_children():
                     self.taken_table.delete(row)
 
-                result_class = CL.CardResult(
+                result_class = src.card_logic.CardResult.CardResult(
                     self.set_metrics, self.tier_data, self.configuration, self.draft.current_pick)
                 result_list = result_class.return_results(
                     stacked_cards, filtered_colors, fields)
@@ -2779,7 +2492,7 @@ class Overlay(ScaledWindow):
                                 if name in fields.values() and card_name in tier_list["ratings"]:
                                     tier_info[name] = tier_list["ratings"][card_name]["comment"]
 
-                        CreateCardToolTip(table,
+                        CardToolTip(table,
                                           event,
                                           card[constants.DATA_FIELD_NAME],
                                           color_dict,
@@ -2972,246 +2685,3 @@ class Overlay(ScaledWindow):
             toggle_widget(self.separator_frame_draft, True)
         else:
             toggle_widget(self.separator_frame_draft, False)
-
-
-class CreateCardToolTip(ScaledWindow):
-    '''Class that's used to create the card tooltip that appears when a table row is clicked'''
-
-    def __init__(self, widget, event, card_name, color_dict, image, images_enabled, scale_factor, fonts_dict, tier_info):
-        super().__init__()
-        self.scale_factor = scale_factor
-        self.fonts_dict = fonts_dict
-        self.waittime = 1  # miliseconds
-        self.widget = widget
-        self.card_name = card_name
-        self.color_dict = color_dict
-        self.image = image
-        self.images_enabled = images_enabled
-        self.widget.bind("<Leave>", self.__leave)
-        self.widget.bind("<ButtonPress-1>", self.__leave, add="+")
-
-        self.id = None
-        self.tw = None
-        self.tier_info = tier_info
-        self.event = event
-        self.images = []
-        self.__enter()
-
-    def __enter(self, event=None):
-        '''Initiate creation of the tooltip widget'''
-        self.__schedule()
-
-    def __leave(self, event=None):
-        '''Remove tooltip when the user hovers over the tooltip or clicks elsewhere'''
-        self.__unschedule()
-        self.__hide_tooltip()
-
-    def __schedule(self):
-        '''Creates the tooltip window widget and stores the id'''
-        self.__unschedule()
-        self.id = self.widget.after(self.waittime, self.__display_tooltip)
-
-    def __unschedule(self):
-        '''Clear the stored widget data when the closing the tooltip'''
-        widget_id = self.id
-        self.id = None
-        if widget_id:
-            self.widget.after_cancel(widget_id)
-
-    def __display_tooltip(self, event=None):
-        '''Function that builds and populates the tooltip window '''
-        try:
-            row_height = self._scale_value(23)
-            tt_width = 0
-            tt_height = self._scale_value(450)
-            # creates a toplevel window
-            self.tw = tkinter.Toplevel(self.widget)
-            # Leaves only the label and removes the app window
-            self.tw.wm_overrideredirect(True)
-            if sys.platform == constants.PLATFORM_ID_OSX:
-                self.tw.wm_overrideredirect(False)
-
-            tt_frame = tkinter.Frame(self.tw, borderwidth=5, relief="solid")
-
-            tkinter.Grid.rowconfigure(tt_frame, 2, weight=1)
-
-            card_label = Label(tt_frame,
-                               text=self.card_name,
-                               style="TooltipHeader.TLabel",
-                               background="#3d3d3d",
-                               foreground="#e6ecec",
-                               relief="groove",
-                               anchor="c",)
-
-            note_label = Label(tt_frame,
-                               text="Win rate fields with fewer than 200 samples are listed as 0% or NA.",
-                               style="Notes.TLabel",
-                               background="#3d3d3d",
-                               foreground="#e6ecec",
-                               anchor="c",)
-
-            if len(self.color_dict) == 2:
-                headers = {"Label": {"width": .60, "anchor": tkinter.W},
-                           "Value1": {"width": .20, "anchor": tkinter.CENTER},
-                           "Value2": {"width": .20, "anchor": tkinter.CENTER}}
-                width = self._scale_value(340)
-            else:
-                headers = {"Label": {"width": .70, "anchor": tkinter.W},
-                           "Value1": {"width": .30, "anchor": tkinter.CENTER}}
-                width = self._scale_value(300)
-
-            tt_width += width
-
-            style = Style()
-            style.configure("Tooltip.Treeview", rowheight=row_height)
-
-            stats_main_table = self._create_header("tooltip_table",
-                                                   tt_frame, 0, self.fonts_dict["All.TableRow"], headers, width, False, True, "Tooltip.Treeview", False)
-            main_field_list = []
-
-            values = ["Filter:"] + list(self.color_dict.keys())
-            main_field_list.append(tuple(values))
-
-            values = ["Average Taken At:"] + \
-                [f"{x[constants.DATA_FIELD_ATA]}" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Average Last Seen At:"] + \
-                [f"{x[constants.DATA_FIELD_ALSA]}" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Improvement When Drawn:"] + \
-                [f"{x[constants.DATA_FIELD_IWD]}pp" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Games In Hand Win Rate:"] + \
-                [f"{x[constants.DATA_FIELD_GIHWR]}%" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Opening Hand Win Rate:"] + \
-                [f"{x[constants.DATA_FIELD_OHWR]}%" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Games Played Win Rate:"] + \
-                [f"{x[constants.DATA_FIELD_GPWR]}%" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Games Drawn Win Rate:"] + \
-                [f"{x[constants.DATA_FIELD_GDWR]}%" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Games Not Seen Win Rate:"] + \
-                [f"{x[constants.DATA_FIELD_GNSWR]}%" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            main_field_list.append(tuple(["", ""]))
-
-            values = ["Number of Games In Hand:"] + \
-                [f"{x[constants.DATA_FIELD_GIH]}" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Number of Games in Opening Hand:"] + \
-                [f"{x[constants.DATA_FIELD_NGOH]}" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Number of Games Played:"] + \
-                [f"{x[constants.DATA_FIELD_NGP]}" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Number of Games Drawn:"] + \
-                [f"{x[constants.DATA_FIELD_NGD]}" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            values = ["Number of Games Not Seen:"] + \
-                [f"{x[constants.DATA_FIELD_NGND]}" for x in self.color_dict.values()]
-            main_field_list.append(tuple(values))
-
-            for x in range(2):
-                main_field_list.append(tuple(["", ""]))
-
-            stats_main_table.config(height=len(main_field_list))
-
-            column_offset = 0
-            # Add scryfall image
-            if self.images_enabled:
-                image_size_y = len(main_field_list) * row_height
-                width = self._scale_value(280)
-                size = width, image_size_y
-                self.images = []
-                request_header = {'User-Agent': 'Mozilla/5.0'}
-                for count, picture_url in enumerate(self.image):
-                    try:
-                        if picture_url:
-                            image_request = urllib.request.Request(
-                                url=picture_url, headers=request_header)
-                            raw_data = urllib.request.urlopen(
-                                image_request).read()
-                            im = Image.open(io.BytesIO(raw_data))
-                            im.thumbnail(size, Image.ANTIALIAS)
-                            image = ImageTk.PhotoImage(im)
-                            image_label = Label(tt_frame, image=image)
-                            image_label.grid(
-                                column=count, row=1, columnspan=1)
-                            self.images.append(image)
-                            column_offset += 1
-                            tt_width += width - self._scale_value(10)
-                    except Exception as error:
-                        logger.error(error)
-
-            card_label.grid(column=0, row=0,
-                            columnspan=column_offset + 2, sticky=tkinter.NSEW)
-
-            row_count = 3
-            for name, comment in self.tier_info.items():
-                if not comment:
-                    continue
-                comment_frame = tkinter.LabelFrame(tt_frame, text=name)
-                comment_frame.grid(column=0, row=row_count,
-                                   columnspan=column_offset + 2, sticky=tkinter.NSEW)
-
-                comment_label = Label(comment_frame,
-                                      text=f"\"{comment}\"",
-                                      background="#3d3d3d",
-                                      foreground="#e6ecec",
-                                      anchor="c",
-                                      wraplength=tt_width,)
-                comment_label.grid(column=0, row=0, sticky=tkinter.NSEW)
-
-                font = ImageFont.truetype('times.ttf', 12)
-                font_size = font.getsize(comment)
-                font_rows = math.ceil(font_size[0] / tt_width) + 2
-                font_height = font_rows * font_size[1]
-                tt_height += self._scale_value(font_height)
-                row_count += 1
-
-            note_label.grid(column=0, row=row_count,
-                            columnspan=column_offset + 2, sticky=tkinter.NSEW)
-
-            for count, row_values in enumerate(main_field_list):
-                row_tag = identify_table_row_tag(False, "", count)
-                stats_main_table.insert(
-                    "", index=count, iid=count, values=row_values, tag=(row_tag,))
-
-            stats_main_table.grid(
-                row=1, column=column_offset)
-
-            tt_width += self._scale_value(10)
-            location_x, location_y = identify_safe_coordinates(self.tw,
-                                                               tt_width,
-                                                               tt_height,
-                                                               self._scale_value(
-                                                                   25),
-                                                               self._scale_value(20))
-            self.tw.wm_geometry(f"+{location_x}+{location_y}")
-
-            tt_frame.pack()
-
-            self.tw.attributes("-topmost", True)
-        except Exception as error:
-            logger.error(error)
-
-    def __hide_tooltip(self):
-        tw = self.tw
-        self.tw = None
-        if tw:
-            tw.destroy()

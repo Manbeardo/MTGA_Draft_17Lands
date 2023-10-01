@@ -2,13 +2,13 @@ import pytest
 import json
 from typing import Tuple
 from dataclasses import asdict
+from src.config.Configuration import Configuration
 
 # Import the functions to be tested
-from src.configuration import (
+from src.config import (
     read_configuration,
     write_configuration,
-    reset_configuration,
-    Configuration
+    reset_configuration
 )
 
 

@@ -1,33 +1,14 @@
-"""This module contains the functions that are used for parsing the Arena log"""
-import os
-import json
-import re
-import logging
-import src.constants as constants
+import src.card_logic.SetMetrics
 import src.card_logic as CL
+import src.constants as constants
+import src.file_extractor.Result
 import src.file_extractor as FE
-from src.logger import create_logger
+from src.log_scanner import LOG_TYPE_DRAFT, logger, retrieve_card_data
 
-if not os.path.exists(constants.DRAFT_LOG_FOLDER):
-    os.makedirs(constants.DRAFT_LOG_FOLDER)
-
-LOG_TYPE_DRAFT = "draftLog"
-
-logger = create_logger()
-
-
-def retrieve_card_data(set_data, card):
-    card_data = {}
-    if (set_data is not None) and (card in set_data["card_ratings"]):
-        card_data = set_data["card_ratings"][card]
-    else:
-        empty_dict = {constants.DATA_FIELD_NAME: card,
-                      constants.DATA_FIELD_MANA_COST: "",
-                      constants.DATA_FIELD_TYPES: [],
-                      constants.DATA_SECTION_IMAGES: []}
-        FE.initialize_card_data(empty_dict)
-        card_data = empty_dict
-    return card_data
+import json
+import logging
+import os
+import re
 
 
 class ArenaScanner:
@@ -946,9 +927,9 @@ class ArenaScanner:
         except Exception as error:
             self.draft_log.info("__sealed_pack_search_v2 Error: %s", error)
         return update
-        
+
     def __sealed_update(self, cards):
-        
+
         if not self.taken_cards:
             self.taken_cards.extend(cards)
 
@@ -974,7 +955,7 @@ class ArenaScanner:
                         if file:
                             result = FE.check_file_integrity(file[0])
 
-                            if result[0] == FE.Result.VALID:
+                            if result[0] == src.file_extractor.Result.Result.VALID:
                                 type_string = f"[{draft_set[0:3]}]{draft_type}" if re.findall(
                                     r"^[Yy]\d{2}", draft_set) else draft_type
                                 data_sources[type_string] = file[0]
@@ -1006,13 +987,13 @@ class ArenaScanner:
 
     def retrieve_set_data(self, file):
         '''Retrieve set data from the set data files'''
-        result = FE.Result.ERROR_MISSING_FILE
+        result = src.file_extractor.Result.Result.ERROR_MISSING_FILE
         self.set_data = None
 
         try:
             result, json_data = FE.check_file_integrity(file)
 
-            if result == FE.Result.VALID:
+            if result == src.file_extractor.Result.Result.VALID:
                 self.set_data = json_data
 
         except Exception as error:
@@ -1022,7 +1003,7 @@ class ArenaScanner:
 
     def retrieve_set_metrics(self, bayesian_enabled):
         '''Parse set data and calculate the mean and standard deviation for a set'''
-        set_metrics = CL.SetMetrics()
+        set_metrics = src.card_logic.SetMetrics.SetMetrics()
 
         try:
             if self.set_data:
