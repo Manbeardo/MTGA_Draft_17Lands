@@ -1,7 +1,7 @@
 from src import constants
 
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 
 
 class Settings(BaseModel):
@@ -39,34 +39,30 @@ class Settings(BaseModel):
     taken_iwd_enabled: bool = False
     arena_log_location: str = ""
 
-    @validator('deck_filter')
-    def validate_deck_filter(cls, value, field):
+    @field_validator('deck_filter')
+    def validate_deck_filter(cls, value, info):
         allowed_values = constants.DECK_FILTERS  # List of options
-        field_name = field.name
         if value not in allowed_values:
-            return cls.__fields__[field_name].default
+            return cls.model_fields[info.field_name].default
         return value
 
-    @validator('filter_format')
-    def validate_filter_format(cls, value, field):
+    @field_validator('filter_format')
+    def validate_filter_format(cls, value, info):
         allowed_values = constants.DECK_FILTER_FORMAT_LIST  # List of options
-        field_name = field.name
         if value not in allowed_values:
-            return cls.__fields__[field_name].default
+            return cls.model_fields[info.field_name].default
         return value
 
-    @validator('result_format')
-    def validate_result_format(cls, value, field):
+    @field_validator('result_format')
+    def validate_result_format(cls, value, info):
         allowed_values = constants.RESULT_FORMAT_LIST  # List of options
-        field_name = field.name
         if value not in allowed_values:
-            return cls.__fields__[field_name].default
+            return cls.model_fields[info.field_name].default
         return value
 
-    @validator('ui_size')
-    def validate_ui_size(cls, value, field):
+    @field_validator('ui_size')
+    def validate_ui_size(cls, value, info):
         allowed_values = constants.UI_SIZE_DICT  # List of options
-        field_name = field.name
         if value not in allowed_values:
-            return cls.__fields__[field_name].default
+            return cls.model_fields[info.field_name].default
         return value

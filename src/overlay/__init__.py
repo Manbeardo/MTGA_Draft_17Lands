@@ -1,7 +1,6 @@
 """This module contains the functions and classes that are used for building and handling the application UI"""
 import tkinter
 import math
-import argparse
 import webbrowser
 from src.logger import create_logger
 from src import card_logic as CL
@@ -180,6 +179,6 @@ def url_callback(event):
     webbrowser.open_new(event.widget.cget("text"))
 
 
-APPLICATION_VERSION = 3.10
+APPLICATION_VERSION = 4.0
 HOTKEY_CTRL_G = '\x07'
 
