@@ -11,7 +11,7 @@ from src.limited_sets.LimitedSets import LimitedSets
 from src.log_scanner.ArenaScanner import ArenaScanner
 from src.overlay import APPLICATION_VERSION, check_version, control_table_column, copy_suggested, copy_taken, fixed_map, identify_card_row_tag, identify_safe_coordinates, identify_table_row_tag, logger, restart_overlay, toggle_widget, url_callback
 from src.overlay.ScaledWindow import ScaledWindow
-
+import argparse
 
 try:
     import win32api
@@ -33,6 +33,21 @@ from tkinter.ttk import Button, Checkbutton, Label, OptionMenu, Progressbar, Sep
 
 class Overlay(ScaledWindow):
     '''Class that handles all of the UI widgets'''
+
+    @staticmethod
+    def start():
+        """Retrieve arguments, create overlay object, and run overlay"""
+        parser = argparse.ArgumentParser()
+
+        parser.add_argument('-f', '--file')
+        parser.add_argument('-d', '--data')
+        parser.add_argument('--step', action='store_true')
+
+        args = parser.parse_args()
+
+        overlay = Overlay(args)
+
+        overlay.main_loop()
 
     def __init__(self, args):
         super().__init__()
@@ -338,6 +353,10 @@ class Overlay(ScaledWindow):
 
         if self.configuration.features.hotkey_enabled:
             self.__start_hotkey_listener()
+
+    def restart(self):
+        self.close_overlay()
+        Overlay.start()
 
     def close_overlay(self):
         if self.log_check_id is not None:

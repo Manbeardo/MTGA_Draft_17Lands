@@ -1,12 +1,10 @@
 """This module contains the functions and classes that are used for building the set files and communicating with platforms"""
-from typing import Tuple
 import sys
 import os
 import json
 import datetime
 import itertools
 import re
-import copy
 from src import constants
 from src.file_extractor.Result import Result
 from src.logger import create_logger

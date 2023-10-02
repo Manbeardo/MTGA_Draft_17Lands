@@ -2,10 +2,10 @@
 """! @brief Magic the Gathering draft application that utilizes 17Lands data"""
 
 # Imports
-from src.overlay import start_overlay
+from src.overlay import Overlay
 
 def main():
-    start_overlay()
+    Overlay.start()
 
 if __name__ == "__main__":
     main()

@@ -1,34 +1,11 @@
 """This module contains the functions and classes that are used for building and handling the application UI"""
 import tkinter
-from tkinter import messagebox
 import math
 import argparse
 import webbrowser
 from src.logger import create_logger
-from src.overlay.Overlay import Overlay
 from src import card_logic as CL
 from src import constants
-
-def start_overlay():
-    """Retrieve arguments, create overlay object, and run overlay"""
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument('-f', '--file')
-    parser.add_argument('-d', '--data')
-    parser.add_argument('--step', action='store_true')
-
-    args = parser.parse_args()
-
-    overlay = Overlay(args)
-
-    overlay.main_loop()
-
-
-def restart_overlay(root):
-    """Close/destroy the current overlay object and create a new instance"""
-    root.close_overlay()
-    start_overlay()
-
 
 def check_version(update, version):
     """Compare the application version and the latest version in the repository"""

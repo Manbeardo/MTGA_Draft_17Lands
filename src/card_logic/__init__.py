@@ -1,6 +1,5 @@
 """This module contains the functions that are used for processing the collected cards"""
 from itertools import combinations
-import logging
 import math
 from src import constants
 from src.card_logic.DeckMetrics import DeckMetrics
